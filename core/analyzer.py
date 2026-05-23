@@ -39,6 +39,16 @@ O JSON deve seguir EXATAMENTE este schema:
   "recomendacoes_gerais": ["string", "string"]
 }
 
+REGRAS DE CLASSIFICAÇÃO DE DIFICULDADE — siga rigorosamente:
+- "Fácil": código simples, curto, erros apenas de estilo ou boas práticas (imports não usados, variáveis não usadas, prints de debug). Nenhuma vulnerabilidade de segurança.
+- "Médio": código moderadamente complexo, erros que podem causar falhas em tempo de execução, credenciais hardcoded, falta de tratamento de exceções, lógica incorreta.
+- "Difícil": código complexo com vulnerabilidades críticas de segurança como SQL Injection, execução arbitrária de comandos (os.system/eval/exec com input externo), exposição de senhas em logs, recursão infinita, race conditions ou falhas que comprometem a integridade do sistema.
+
+REGRAS DE SCORE — siga rigorosamente:
+- Problemas de estilo/boas práticas: score entre 70-90
+- Problemas de qualidade/lógica: score entre 40-69
+- Vulnerabilidades críticas de segurança: score entre 0-39
+
 REGRAS OBRIGATÓRIAS:
 - Sempre copie o trecho_original EXATAMENTE como está no código — não invente.
 - Se não houver linha definida, use null.
@@ -79,14 +89,11 @@ def parse_analysis_response(raw: str) -> dict | None:
     Extrai e parseia o JSON da resposta da IA.
     Retorna o dict ou None se falhar.
     """
-    # Tenta extrair JSON mesmo que venha com texto ao redor
     try:
-        # Tenta direto
         return json.loads(raw.strip())
     except json.JSONDecodeError:
         pass
 
-    # Tenta extrair bloco ```json ... ```
     match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
     if match:
         try:
@@ -94,7 +101,6 @@ def parse_analysis_response(raw: str) -> dict | None:
         except json.JSONDecodeError:
             pass
 
-    # Tenta achar o primeiro { ... } no texto
     start = raw.find("{")
     end = raw.rfind("}") + 1
     if start != -1 and end > start:
