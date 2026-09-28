@@ -6,8 +6,7 @@ import tempfile
 import io
 import streamlit as st
 from core.file_scanner import scan_project, read_file, get_language_from_ext, build_file_tree
-from core.analyzer import build_analysis_messages, parse_analysis_response
-from core.ai_client import call_ai
+from core.analyzer import analisar_conteudo
 from utils.helpers import render_full_analysis, render_file_tree
 
 EXTENSIONS_ALLOWED = {
@@ -269,24 +268,35 @@ Selecione vários arquivos de código diretamente (sem precisar compactar).
                 (i + 1) / len(selected_files),
                 text=f"🔍 Analisando {finfo['name']} ({i+1}/{len(selected_files)})..."
             )
-            content  = finfo["content"]
-            lang     = get_language_from_ext(finfo["ext"])
-            messages = build_analysis_messages(finfo["name"], lang, content)
-            try:
-                raw  = call_ai(ai_cfg["backend"], ai_cfg["client"],
-                               ai_cfg["model"], messages, ai_cfg["ollama_url"])
-                data = parse_analysis_response(raw)
-                results[finfo["relative_path"]] = {
-                    "data": data, "raw": raw, "lang": lang, "name": finfo["name"]
-                }
-            except Exception as e:
-                results[finfo["relative_path"]] = {
-                    "data": None, "raw": str(e), "lang": lang, "name": finfo["name"]
-                }
+            lang = get_language_from_ext(finfo["ext"])
+            results[finfo["relative_path"]] = analisar_conteudo(
+                ai_cfg, finfo["name"], lang, finfo["content"]
+            )
 
         progress.progress(1.0, text="✅ Concluído!")
         st.session_state["proj_results"] = results
-        st.success(f"🎉 {len(results)} arquivo(s) analisado(s)! Veja os resultados abaixo.")
+
+        analisados = [r for r in results.values() if r.ok]
+        falhas = [r for r in results.values() if not r.ok]
+
+        st.success(
+            f"🎉 {len(analisados)} de {len(results)} arquivo(s) analisado(s)."
+        )
+
+        if falhas:
+            st.warning(
+                f"{len(falhas)} arquivo(s) não puderam ser analisados. "
+                "O motivo de cada um está no bloco correspondente abaixo."
+            )
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Tempo total", f"{sum(r.segundos for r in results.values()):.1f}s")
+        c2.metric("Tokens consumidos", f"{sum(r.tokens_total for r in results.values()):,}".replace(",", "."))
+        c3.metric(
+            "Score médio",
+            f"{sum(r.dados['score_qualidade'] for r in analisados) / len(analisados):.0f}"
+            if analisados else "—",
+        )
 
     results = st.session_state.get("proj_results", {})
     if not results:
@@ -296,10 +306,11 @@ Selecione vários arquivos de código diretamente (sem precisar compactar).
     st.markdown(f"## 📊 Resultados — {len(results)} arquivo(s)")
 
     for rel_path, res in results.items():
-        if res["data"]:
-            render_full_analysis(res["data"], res["name"], res["lang"])
+        if res.ok:
+            render_full_analysis(res.dados, res.nome, res.linguagem)
         else:
-            with st.expander(f"⚠️ {res['name']} — erro ao processar"):
-                st.error("A IA não retornou resposta estruturada para este arquivo.")
-                st.caption("Isso pode acontecer com arquivos muito grandes. Tente analisá-lo individualmente.")
-                st.code(res["raw"], language="text")
+            with st.expander(f"⚠️ {res.nome} — não foi possível analisar"):
+                st.error(res.erro)
+                if res.bruto:
+                    st.caption("Resposta bruta do modelo:")
+                    st.code(res.bruto[:3000], language="text")

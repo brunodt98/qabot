@@ -3,9 +3,44 @@ QABot — AI Client
 Gerencia a conexão com os backends de IA: Groq (online) e Ollama (local).
 """
 
-import requests
 import logging
+import time
+from dataclasses import dataclass
+
+import requests
 from groq import Groq
+
+
+# Teto de tokens da resposta. A análise devolve um JSON que cresce com o
+# número de problemas encontrados: cada problema traz trecho original,
+# correção e explicação. Com teto baixo a resposta é cortada no meio e o
+# JSON fica inválido — o arquivo aparece como "erro ao processar" sem que
+# o motivo real (o teto) fique visível.
+MAX_TOKENS_ANALISE = 8000
+MAX_TOKENS_CHAT = 2000
+
+TEMPERATURA = 0.2
+
+TIMEOUT_OLLAMA = 300
+
+
+class ErroDeIA(RuntimeError):
+    """Falha ao chamar o backend, com mensagem já legível para a interface."""
+
+
+@dataclass
+class RespostaIA:
+    """Resposta do modelo com os metadados necessários para diagnóstico."""
+
+    texto: str
+    truncada: bool = False
+    tokens_entrada: int = 0
+    tokens_saida: int = 0
+    segundos: float = 0.0
+
+    @property
+    def tokens_total(self) -> int:
+        return self.tokens_entrada + self.tokens_saida
 
 
 def build_groq_client(api_key: str) -> Groq | None:
@@ -32,37 +67,107 @@ def test_ollama_connection(base_url: str = "http://localhost:11434") -> tuple[bo
         return False, []
 
 
-def call_groq(client: Groq, model: str, messages: list[dict]) -> str:
-    """Envia mensagens para a API Groq e retorna o texto da resposta."""
-    response = client.chat.completions.create(
-        messages=messages,
-        model=model,
-        temperature=0.2,
-        max_tokens=3000,
+def _mensagem_de_erro_groq(e: Exception) -> str:
+    """Traduz a exceção do SDK numa mensagem que diz o que fazer."""
+    texto = str(e)
+    codigo = getattr(getattr(e, "response", None), "status_code", None)
+
+    if codigo == 401 or "invalid_api_key" in texto or "Invalid API Key" in texto:
+        return "API Key da Groq inválida. Gere outra em console.groq.com."
+
+    if codigo == 429 or "rate_limit" in texto:
+        return ("Limite de uso da Groq atingido. Aguarde alguns instantes ou "
+                "troque para um modelo menor na barra lateral.")
+
+    if codigo == 413 or "too large" in texto.lower():
+        return ("O arquivo excede o limite de contexto deste modelo. "
+                "Analise-o em partes ou escolha um modelo com contexto maior.")
+
+    return f"Falha ao chamar a Groq: {texto[:300]}"
+
+
+def call_groq(client: Groq, model: str, messages: list[dict],
+              max_tokens: int = MAX_TOKENS_ANALISE) -> RespostaIA:
+    """Envia mensagens para a API Groq e devolve a resposta com metadados."""
+    if client is None:
+        raise ErroDeIA("Cliente Groq não configurado. Informe a API Key na barra lateral.")
+
+    inicio = time.perf_counter()
+
+    try:
+        resposta = client.chat.completions.create(
+            messages=messages,
+            model=model,
+            temperature=TEMPERATURA,
+            max_tokens=max_tokens,
+        )
+    except Exception as e:
+        raise ErroDeIA(_mensagem_de_erro_groq(e))
+
+    segundos = time.perf_counter() - inicio
+
+    escolha = resposta.choices[0]
+    uso = getattr(resposta, "usage", None)
+
+    return RespostaIA(
+        texto=escolha.message.content or "",
+        truncada=(escolha.finish_reason == "length"),
+        tokens_entrada=getattr(uso, "prompt_tokens", 0) or 0,
+        tokens_saida=getattr(uso, "completion_tokens", 0) or 0,
+        segundos=segundos,
     )
-    return response.choices[0].message.content
 
 
 def call_ollama(model: str, messages: list[dict],
-                base_url: str = "http://localhost:11434") -> str:
-    """Envia mensagens para o Ollama local e retorna o texto da resposta."""
+                base_url: str = "http://localhost:11434",
+                max_tokens: int = MAX_TOKENS_ANALISE) -> RespostaIA:
+    """Envia mensagens para o Ollama local e devolve a resposta com metadados."""
     payload = {
         "model": model,
         "messages": messages,
         "stream": False,
-        "options": {"temperature": 0.2},
+        "options": {"temperature": TEMPERATURA, "num_predict": max_tokens},
     }
-    r = requests.post(f"{base_url}/api/chat", json=payload, timeout=180)
-    r.raise_for_status()
-    return r.json()["message"]["content"]
+
+    inicio = time.perf_counter()
+
+    try:
+        r = requests.post(f"{base_url}/api/chat", json=payload, timeout=TIMEOUT_OLLAMA)
+        r.raise_for_status()
+    except requests.Timeout:
+        raise ErroDeIA(
+            f"O Ollama não respondeu em {TIMEOUT_OLLAMA}s. "
+            "Modelos grandes em CPU podem passar disso — tente um modelo menor."
+        )
+    except requests.ConnectionError:
+        raise ErroDeIA(
+            f"Não foi possível conectar ao Ollama em {base_url}. "
+            "Verifique se ele está em execução."
+        )
+    except requests.HTTPError as e:
+        raise ErroDeIA(f"O Ollama respondeu com erro: {e}")
+
+    segundos = time.perf_counter() - inicio
+    dados = r.json()
+
+    return RespostaIA(
+        texto=dados.get("message", {}).get("content", "") or "",
+        # O Ollama informa o motivo da parada em done_reason nas versões
+        # recentes; quando ausente, assume-se resposta completa.
+        truncada=(dados.get("done_reason") == "length"),
+        tokens_entrada=dados.get("prompt_eval_count", 0) or 0,
+        tokens_saida=dados.get("eval_count", 0) or 0,
+        segundos=segundos,
+    )
 
 
-def call_ai(backend: str, client, model: str,
-            messages: list[dict], ollama_url: str = "http://localhost:11434") -> str:
+def call_ai(backend: str, client, model: str, messages: list[dict],
+            ollama_url: str = "http://localhost:11434",
+            max_tokens: int = MAX_TOKENS_ANALISE) -> RespostaIA:
     """
     Roteador unificado: chama Groq ou Ollama conforme backend selecionado.
+    Devolve sempre um RespostaIA, e levanta ErroDeIA com mensagem legível.
     """
     if backend == "Groq":
-        return call_groq(client, model, messages)
-    else:
-        return call_ollama(model, messages, base_url=ollama_url)
+        return call_groq(client, model, messages, max_tokens=max_tokens)
+    return call_ollama(model, messages, base_url=ollama_url, max_tokens=max_tokens)

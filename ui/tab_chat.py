@@ -2,7 +2,7 @@
 
 import streamlit as st
 from core.analyzer import SYSTEM_PROMPT_CHAT
-from core.ai_client import call_ai
+from core.ai_client import MAX_TOKENS_CHAT, ErroDeIA, call_ai
 
 
 def render_tab_chat(ai_cfg: dict):
@@ -41,9 +41,12 @@ def render_tab_chat(ai_cfg: dict):
         with st.spinner("Pensando..."):
             try:
                 resp = call_ai(ai_cfg["backend"], ai_cfg["client"],
-                               ai_cfg["model"], api_msgs, ai_cfg["ollama_url"])
-                st.markdown(resp)
+                               ai_cfg["model"], api_msgs, ai_cfg["ollama_url"],
+                               max_tokens=MAX_TOKENS_CHAT)
+                st.markdown(resp.texto)
                 st.session_state.chat_messages.append(
-                    {"role": "assistant", "content": resp})
+                    {"role": "assistant", "content": resp.texto})
+            except ErroDeIA as e:
+                st.error(str(e))
             except Exception as e:
-                st.error(f"Erro: {e}")
+                st.error(f"Erro inesperado: {type(e).__name__}: {e}")

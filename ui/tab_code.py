@@ -1,8 +1,7 @@
 """QABot — Tab: Analisar Código"""
 
 import streamlit as st
-from core.analyzer import build_analysis_messages, parse_analysis_response
-from core.ai_client import call_ai
+from core.analyzer import analisar_conteudo
 from utils.helpers import render_full_analysis
 
 LANGUAGES = {
@@ -37,16 +36,17 @@ def render_tab_code(ai_cfg: dict):
             return
 
         with st.spinner("🔍 Analisando..."):
-            messages = build_analysis_messages(filename, lang, code_input)
-            try:
-                raw  = call_ai(ai_cfg["backend"], ai_cfg["client"],
-                               ai_cfg["model"], messages, ai_cfg["ollama_url"])
-                data = parse_analysis_response(raw)
-                if data:
-                    st.divider()
-                    render_full_analysis(data, filename, lang)
-                else:
-                    st.warning("A IA não retornou resposta estruturada. Resposta bruta:")
-                    st.code(raw, language="text")
-            except Exception as e:
-                st.error(f"Erro ao comunicar com a IA: {e}")
+            res = analisar_conteudo(ai_cfg, filename, lang, code_input)
+
+        if res.ok:
+            st.divider()
+            render_full_analysis(res.dados, filename, lang)
+            st.caption(
+                f"⏱️ {res.segundos:.1f}s · {res.tokens_total} tokens"
+                + (f" · {res.tentativas} tentativas" if res.tentativas > 1 else "")
+            )
+        else:
+            st.error(res.erro)
+            if res.bruto:
+                with st.expander("Resposta bruta do modelo"):
+                    st.code(res.bruto, language="text")

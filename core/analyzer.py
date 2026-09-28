@@ -5,6 +5,9 @@ Define os prompts do sistema e a lógica de parsing das respostas da IA.
 
 import json
 import re
+from dataclasses import dataclass
+
+from core.ai_client import ErroDeIA, call_ai
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SYSTEM PROMPT — Análise de Arquivo
@@ -115,3 +118,239 @@ def parse_analysis_response(raw: str) -> dict | None:
 def get_severity_rank(severidade: str) -> int:
     """Retorna rank numérico para ordenar por severidade."""
     return {"crítico": 0, "alto": 1, "médio": 2, "baixo": 3}.get(severidade, 4)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NORMALIZAÇÃO DO RESULTADO
+# ─────────────────────────────────────────────────────────────────────────────
+
+TIPOS_VALIDOS = {"erro", "aviso", "segurança", "performance", "estilo"}
+SEVERIDADES_VALIDAS = {"crítico", "alto", "médio", "baixo"}
+DIFICULDADES_VALIDAS = {"Fácil", "Médio", "Difícil"}
+
+
+def _texto(valor, padrao: str = "") -> str:
+    """Devolve sempre string. O modelo às vezes manda null ou número."""
+    if valor is None:
+        return padrao
+    return str(valor)
+
+
+def _inteiro(valor, padrao: int = 0, minimo: int = 0, maximo: int = 100) -> int:
+    try:
+        return max(minimo, min(maximo, int(float(valor))))
+    except (TypeError, ValueError):
+        return padrao
+
+
+def _linha(valor) -> int | None:
+    try:
+        return int(valor)
+    except (TypeError, ValueError):
+        return None
+
+
+def _lista_de_textos(valor) -> list[str]:
+    if not isinstance(valor, list):
+        return []
+    return [_texto(v) for v in valor if v is not None]
+
+
+def normalizar_analise(data: dict | None) -> dict | None:
+    """
+    Garante que o resultado tem os campos e os TIPOS que a renderização espera.
+
+    O parsing só assegura que o JSON é válido, não que ele segue o schema: o
+    modelo pode mandar `problemas` como lista de strings, `linha_inicio` como
+    texto ou `trecho_original` como null. Sem isso, o erro só aparece na hora
+    de desenhar a tela.
+    """
+    if not isinstance(data, dict):
+        return None
+
+    problemas = []
+
+    for i, bruto in enumerate(data.get("problemas") or [], start=1):
+        if not isinstance(bruto, dict):
+            # Modelo devolveu texto solto no lugar do objeto: preserva o
+            # conteúdo como descrição em vez de descartar o achado.
+            problemas.append({
+                "id": i,
+                "tipo": "aviso",
+                "severidade": "médio",
+                "linha_inicio": None,
+                "linha_fim": None,
+                "titulo": "Problema relatado sem estrutura",
+                "descricao": _texto(bruto),
+                "trecho_original": "",
+                "correcao_sugerida": "",
+                "explicacao_correcao": "",
+            })
+            continue
+
+        tipo = _texto(bruto.get("tipo"), "aviso").lower()
+        severidade = _texto(bruto.get("severidade"), "médio").lower()
+
+        problemas.append({
+            "id": _inteiro(bruto.get("id"), i, minimo=1, maximo=10_000),
+            "tipo": tipo if tipo in TIPOS_VALIDOS else "aviso",
+            "severidade": severidade if severidade in SEVERIDADES_VALIDAS else "médio",
+            "linha_inicio": _linha(bruto.get("linha_inicio")),
+            "linha_fim": _linha(bruto.get("linha_fim")),
+            "titulo": _texto(bruto.get("titulo"), "Problema"),
+            "descricao": _texto(bruto.get("descricao")),
+            "trecho_original": _texto(bruto.get("trecho_original")),
+            "correcao_sugerida": _texto(bruto.get("correcao_sugerida")),
+            "explicacao_correcao": _texto(bruto.get("explicacao_correcao")),
+        })
+
+    dificuldade = _texto(data.get("classificacao_dificuldade"), "Médio").capitalize()
+
+    if dificuldade not in DIFICULDADES_VALIDAS:
+        dificuldade = "Médio"
+
+    return {
+        "resumo": _texto(data.get("resumo")),
+        "score_qualidade": _inteiro(data.get("score_qualidade"), 0),
+        "classificacao_dificuldade": dificuldade,
+        "justificativa_dificuldade": _texto(data.get("justificativa_dificuldade")),
+        "problemas": problemas,
+        "pontos_positivos": _lista_de_textos(data.get("pontos_positivos")),
+        "recomendacoes_gerais": _lista_de_textos(data.get("recomendacoes_gerais")),
+    }
+
+
+def build_retry_messages(mensagens_originais: list[dict], resposta_invalida: str) -> list[dict]:
+    """
+    Monta uma segunda tentativa quando a primeira resposta não era JSON válido.
+
+    Em vez de repetir a mesma pergunta, devolve ao modelo o que ele respondeu
+    e pede a correção — o que costuma bastar quando o erro foi texto extra
+    em volta do JSON.
+    """
+    return mensagens_originais + [
+        {"role": "assistant", "content": resposta_invalida[:2000]},
+        {
+            "role": "user",
+            "content": (
+                "Sua resposta anterior não é um JSON válido. Reescreva-a "
+                "seguindo exatamente o schema pedido, começando com { e "
+                "terminando com }, sem nenhum texto antes ou depois, sem "
+                "cercas de código e sem comentários."
+            ),
+        },
+    ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ORQUESTRAÇÃO DA ANÁLISE
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class ResultadoAnalise:
+    """Resultado de analisar um arquivo, com o diagnóstico do que aconteceu."""
+
+    nome: str
+    linguagem: str
+    dados: dict | None = None
+    erro: str | None = None
+    bruto: str = ""
+    truncada: bool = False
+    tentativas: int = 1
+    segundos: float = 0.0
+    tokens_entrada: int = 0
+    tokens_saida: int = 0
+
+    @property
+    def ok(self) -> bool:
+        return self.dados is not None
+
+    @property
+    def tokens_total(self) -> int:
+        return self.tokens_entrada + self.tokens_saida
+
+
+def analisar_conteudo(ai_cfg: dict, filename: str, language: str,
+                      content: str) -> ResultadoAnalise:
+    """
+    Analisa um arquivo de ponta a ponta: monta o prompt, chama o modelo,
+    tenta interpretar o JSON e, se falhar, faz UMA nova tentativa pedindo a
+    correção do formato.
+
+    Nunca levanta exceção: devolve sempre um ResultadoAnalise, com `erro`
+    preenchido quando não deu certo, para que um arquivo problemático não
+    interrompa a análise em lote.
+    """
+    mensagens = build_analysis_messages(filename, language, content)
+
+    resultado = ResultadoAnalise(nome=filename, linguagem=language)
+
+    try:
+        resposta = call_ai(
+            ai_cfg["backend"], ai_cfg.get("client"), ai_cfg["model"],
+            mensagens, ai_cfg.get("ollama_url", "http://localhost:11434"),
+        )
+    except ErroDeIA as e:
+        resultado.erro = str(e)
+        return resultado
+    except Exception as e:
+        resultado.erro = f"Erro inesperado: {type(e).__name__}: {e}"
+        return resultado
+
+    resultado.bruto = resposta.texto
+    resultado.truncada = resposta.truncada
+    resultado.segundos = resposta.segundos
+    resultado.tokens_entrada = resposta.tokens_entrada
+    resultado.tokens_saida = resposta.tokens_saida
+
+    dados = normalizar_analise(parse_analysis_response(resposta.texto))
+
+    if dados is not None:
+        resultado.dados = dados
+        return resultado
+
+    # A resposta veio cortada no teto de tokens: repetir não adianta, o
+    # segundo corte cairia no mesmo lugar. Reportar a causa real.
+    if resposta.truncada:
+        resultado.erro = (
+            "A resposta do modelo foi cortada por atingir o limite de tokens. "
+            "Isso costuma acontecer quando o arquivo tem muitos problemas. "
+            "Analise-o em partes ou escolha um modelo com saída maior."
+        )
+        return resultado
+
+    # Formato inválido sem truncamento: normalmente é texto em volta do
+    # JSON, e uma segunda tentativa pedindo a correção resolve.
+    resultado.tentativas = 2
+
+    try:
+        retry = call_ai(
+            ai_cfg["backend"], ai_cfg.get("client"), ai_cfg["model"],
+            build_retry_messages(mensagens, resposta.texto),
+            ai_cfg.get("ollama_url", "http://localhost:11434"),
+        )
+    except ErroDeIA as e:
+        resultado.erro = str(e)
+        return resultado
+    except Exception as e:
+        resultado.erro = f"Erro inesperado na segunda tentativa: {e}"
+        return resultado
+
+    resultado.segundos += retry.segundos
+    resultado.tokens_entrada += retry.tokens_entrada
+    resultado.tokens_saida += retry.tokens_saida
+    resultado.truncada = resultado.truncada or retry.truncada
+
+    dados = normalizar_analise(parse_analysis_response(retry.texto))
+
+    if dados is None:
+        resultado.bruto = retry.texto
+        resultado.erro = (
+            "O modelo não devolveu JSON válido em duas tentativas. "
+            "Modelos menores costumam falhar nisso — tente um modelo maior "
+            "na barra lateral."
+        )
+        return resultado
+
+    resultado.dados = dados
+    return resultado
