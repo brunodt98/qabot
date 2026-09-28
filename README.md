@@ -108,6 +108,46 @@ execuções mais do que o necessário.
 - **Chat QA** — conversa sobre testes, CI/CD, refatoração e boas práticas,
   sem contexto de arquivo
 
+## Avaliação
+
+Uma ferramenta que julga qualidade de código precisa, ela mesma, ser medida.
+`eval/` traz o instrumento para isso.
+
+`eval/casos/` tem 8 arquivos Python com **defeitos plantados de propósito**,
+cobrindo as três faixas de classificação do prompt:
+
+| Caso | Defeito plantado | Faixa esperada |
+|---|---|---|
+| `01_import_nao_usado.py` | imports ociosos e `print` de debug | 70–90, Fácil |
+| `02_variavel_nao_usada.py` | variável declarada e nunca usada | 70–90, Fácil |
+| `03_except_generico.py` | `except:` nu, engole qualquer exceção | 40–69, Médio |
+| `04_credencial_hardcoded.py` | token de API e senha no código | 40–69, Médio |
+| `05_sql_injection.py` | entrada do usuário concatenada em query | 0–39, Difícil |
+| `06_eval_entrada_usuario.py` | `eval()` sobre entrada do usuário | 0–39, Difícil |
+| `07_comando_do_usuario.py` | `os.system` com entrada externa e senha em log | 0–39, Difícil |
+| `08_codigo_limpo.py` | **nenhum** — mede falso positivo | 80–100, Fácil |
+
+`eval/gabarito.json` registra, para cada caso, o que deveria ser encontrado e
+quais palavras-chave contam como acerto. `eval/avaliar.py` roda a mesma função
+que a interface usa e mede quatro coisas:
+
+1. **Detecção** — o defeito plantado apareceu no relatório?
+2. **Faixa de score** — o score respeitou a regra escrita no prompt?
+3. **Dificuldade** — a classificação bateu com a esperada?
+4. **Falso positivo** — no arquivo limpo, apontou problema grave inexistente?
+
+```bash
+python eval/avaliar.py --api-key SUA_CHAVE_GROQ
+python eval/avaliar.py --backend Ollama --model llama3
+```
+
+A saída vai para o terminal e para `eval/resultado_avaliacao.json`, com o
+modelo e a data da execução registrados.
+
+**Ainda não há resultados medidos neste repositório.** A avaliação consome
+chamadas de API e precisa ser executada com uma chave própria. O que está
+versionado é o instrumento de medida, não uma nota de desempenho.
+
 ## Stack
 
 | Camada | Escolha |
@@ -135,6 +175,10 @@ qabot/
 │   └── tab_chat.py         # chat sobre QA
 ├── utils/
 │   └── helpers.py          # renderização do laudo
+├── eval/
+│   ├── casos/              # 8 arquivos com defeitos plantados
+│   ├── gabarito.json       # o que deveria ser encontrado em cada um
+│   └── avaliar.py          # mede detecção, score, dificuldade e falso positivo
 └── requirements.txt
 ```
 
@@ -180,10 +224,21 @@ código sai da sua máquina, o que importa ao analisar projeto privado.
 - **Nenhuma validação de schema além do parsing.** Se o modelo devolver JSON
   válido mas com campo faltando, o erro aparece só na renderização. Um
   contrato explícito (Pydantic, por exemplo) resolveria.
-- **Sem testes automatizados** e sem conjunto de avaliação. Não há medida de
-  quantos problemas reais ele encontra nem de quantos falsos positivos gera —
-  seria o próximo passo natural: montar arquivos com defeitos conhecidos e
-  medir acerto.
+- **A avaliação é uma fotografia, não uma garantia.** Como o modelo não é
+  determinístico, duas execuções de `eval/avaliar.py` sobre os mesmos arquivos
+  podem dar números diferentes. O resultado vale para aquele modelo, naquela
+  execução — por isso o JSON de saída registra modelo e data. Para afirmar
+  desempenho com alguma segurança seria preciso repetir a medição várias vezes
+  e olhar a variação, não uma rodada só.
+- **A detecção é medida por palavra-chave.** Se o modelo descreve o mesmo
+  defeito com outras palavras, conta como não detectado — o número tende a
+  subestimar. É o mesmo compromisso do gabarito por keyword: objetivo e
+  reproduzível, mas grosseiro.
+- **8 casos é uma amostra pequena**, toda em Python. Não cobre as outras 19
+  extensões que o scanner aceita.
+- **Sem testes unitários automatizados.** A normalização das respostas foi
+  verificada manualmente contra respostas malformadas, mas isso não está
+  versionado como suíte de testes.
 
 ## Contexto
 

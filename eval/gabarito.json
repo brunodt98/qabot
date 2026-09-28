@@ -1,0 +1,113 @@
+{
+  "descricao": "Gabarito da avaliacao do QABot. Cada caso em eval/casos/ tem defeitos plantados de proposito, e aqui esta registrado o que o QABot DEVERIA encontrar. As palavras-chave sao usadas para decidir se um problema reportado corresponde ao defeito plantado: basta uma delas aparecer no titulo ou na descricao do problema.",
+  "como_interpretar": "Deteccao mede se o defeito plantado foi encontrado. Faixa de score e dificuldade medem se o modelo obedeceu as regras de classificacao escritas no prompt de core/analyzer.py. O caso 08 nao tem defeito: ele mede falso positivo, entao o esperado e' score alto e nenhum problema de severidade critica ou alta.",
+  "casos": [
+    {
+      "id": "c01",
+      "arquivo": "01_import_nao_usado.py",
+      "defeitos_plantados": [
+        {
+          "nome": "imports nao utilizados (os, json, datetime)",
+          "palavras_chave": ["import", "nao usado", "não usado", "nao utilizado", "não utilizado", "unused"]
+        },
+        {
+          "nome": "print de debug deixado no codigo",
+          "palavras_chave": ["print", "debug", "logging"]
+        }
+      ],
+      "faixa_score": [70, 90],
+      "dificuldade_esperada": "Fácil",
+      "severidade_maxima_esperada": "baixo"
+    },
+    {
+      "id": "c02",
+      "arquivo": "02_variavel_nao_usada.py",
+      "defeitos_plantados": [
+        {
+          "nome": "variavel media_ponderada declarada e nunca usada",
+          "palavras_chave": ["media_ponderada", "variável", "variavel", "nao usada", "não usada", "unused"]
+        }
+      ],
+      "faixa_score": [70, 90],
+      "dificuldade_esperada": "Fácil",
+      "severidade_maxima_esperada": "baixo"
+    },
+    {
+      "id": "c03",
+      "arquivo": "03_except_generico.py",
+      "defeitos_plantados": [
+        {
+          "nome": "except nu, engole qualquer excecao sem tratar",
+          "palavras_chave": ["except", "exceção", "excecao", "silencia", "generico", "genérico", "bare"]
+        }
+      ],
+      "faixa_score": [40, 69],
+      "dificuldade_esperada": "Médio",
+      "severidade_maxima_esperada": "alto"
+    },
+    {
+      "id": "c04",
+      "arquivo": "04_credencial_hardcoded.py",
+      "defeitos_plantados": [
+        {
+          "nome": "token de API e senha escritos no codigo",
+          "palavras_chave": ["credencial", "hardcoded", "senha", "token", "segredo", "variável de ambiente", "variavel de ambiente"]
+        }
+      ],
+      "faixa_score": [40, 69],
+      "dificuldade_esperada": "Médio",
+      "severidade_maxima_esperada": "crítico"
+    },
+    {
+      "id": "c05",
+      "arquivo": "05_sql_injection.py",
+      "defeitos_plantados": [
+        {
+          "nome": "concatenacao de entrada do usuario em query SQL",
+          "palavras_chave": ["sql injection", "injeção de sql", "injecao de sql", "sql", "parametriz"]
+        }
+      ],
+      "faixa_score": [0, 39],
+      "dificuldade_esperada": "Difícil",
+      "severidade_maxima_esperada": "crítico"
+    },
+    {
+      "id": "c06",
+      "arquivo": "06_eval_entrada_usuario.py",
+      "defeitos_plantados": [
+        {
+          "nome": "eval() sobre entrada do usuario, permite execucao arbitraria",
+          "palavras_chave": ["eval", "execução arbitrária", "execucao arbitraria", "código arbitrário", "codigo arbitrario", "rce"]
+        }
+      ],
+      "faixa_score": [0, 39],
+      "dificuldade_esperada": "Difícil",
+      "severidade_maxima_esperada": "crítico"
+    },
+    {
+      "id": "c07",
+      "arquivo": "07_comando_do_usuario.py",
+      "defeitos_plantados": [
+        {
+          "nome": "os.system com string montada a partir de entrada externa",
+          "palavras_chave": ["os.system", "comando", "injeção de comando", "injecao de comando", "shell", "subprocess"]
+        },
+        {
+          "nome": "senha gravada em log",
+          "palavras_chave": ["senha", "log", "registro", "exposição", "exposicao"]
+        }
+      ],
+      "faixa_score": [0, 39],
+      "dificuldade_esperada": "Difícil",
+      "severidade_maxima_esperada": "crítico"
+    },
+    {
+      "id": "c08",
+      "arquivo": "08_codigo_limpo.py",
+      "defeitos_plantados": [],
+      "faixa_score": [80, 100],
+      "dificuldade_esperada": "Fácil",
+      "severidade_maxima_esperada": "baixo"
+    }
+  ]
+}
