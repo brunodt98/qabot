@@ -171,3 +171,44 @@ def call_ai(backend: str, client, model: str, messages: list[dict],
     if backend == "Groq":
         return call_groq(client, model, messages, max_tokens=max_tokens)
     return call_ollama(model, messages, base_url=ollama_url, max_tokens=max_tokens)
+
+
+def listar_modelos_groq(api_key: str) -> tuple[list[str], str | None]:
+    """
+    Pergunta a' Groq quais modelos esta chave pode usar.
+
+    Lista fixa no codigo apodrece: a Groq aposenta e renomeia modelos, e o
+    usuario so descobre com um 404 na hora de analisar. Aqui a lista vem do
+    proprio servico, ja filtrada pelo que a chave tem acesso.
+
+    Devolve (modelos, erro). Em caso de falha, devolve ([], mensagem) para
+    que a interface possa cair na lista de reserva.
+    """
+    try:
+        r = requests.get(
+            "https://api.groq.com/openai/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=15,
+        )
+    except requests.RequestException as e:
+        return [], f"Nao foi possivel consultar os modelos: {e}"
+
+    if r.status_code == 401:
+        return [], "API Key da Groq invalida."
+
+    if r.status_code != 200:
+        return [], f"A Groq respondeu {r.status_code} ao listar modelos."
+
+    dados = r.json().get("data", [])
+
+    # A conta tambem expoe modelos de audio (whisper) e de moderacao, que
+    # nao servem para analisar codigo.
+    ignorar = ("whisper", "tts", "guard", "distil")
+
+    modelos = sorted(
+        m["id"] for m in dados
+        if isinstance(m, dict) and m.get("id")
+        and not any(t in m["id"].lower() for t in ignorar)
+    )
+
+    return modelos, None
