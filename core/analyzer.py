@@ -7,7 +7,7 @@ import json
 import re
 from dataclasses import dataclass
 
-from core.ai_client import ErroDeIA, call_ai
+from core.ai_client import MAX_TOKENS_ANALISE, ErroDeIA, call_ai
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SYSTEM PROMPT — Análise de Arquivo
@@ -270,6 +270,16 @@ class ResultadoAnalise:
         return self.tokens_entrada + self.tokens_saida
 
 
+def _teto(ai_cfg: dict) -> int:
+    """Teto de saida a pedir: o do modelo, quando menor que o nosso padrao."""
+    do_modelo = ai_cfg.get("max_tokens")
+
+    if isinstance(do_modelo, int) and do_modelo > 0:
+        return min(do_modelo, MAX_TOKENS_ANALISE)
+
+    return MAX_TOKENS_ANALISE
+
+
 def analisar_conteudo(ai_cfg: dict, filename: str, language: str,
                       content: str) -> ResultadoAnalise:
     """
@@ -289,6 +299,7 @@ def analisar_conteudo(ai_cfg: dict, filename: str, language: str,
         resposta = call_ai(
             ai_cfg["backend"], ai_cfg.get("client"), ai_cfg["model"],
             mensagens, ai_cfg.get("ollama_url", "http://localhost:11434"),
+            max_tokens=_teto(ai_cfg),
         )
     except ErroDeIA as e:
         resultado.erro = str(e)
@@ -328,6 +339,7 @@ def analisar_conteudo(ai_cfg: dict, filename: str, language: str,
             ai_cfg["backend"], ai_cfg.get("client"), ai_cfg["model"],
             build_retry_messages(mensagens, resposta.texto),
             ai_cfg.get("ollama_url", "http://localhost:11434"),
+            max_tokens=_teto(ai_cfg),
         )
     except ErroDeIA as e:
         resultado.erro = str(e)

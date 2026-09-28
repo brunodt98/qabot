@@ -4,6 +4,7 @@ Gerencia a conexão com os backends de IA: Groq (online) e Ollama (local).
 """
 
 import logging
+import re
 import time
 from dataclasses import dataclass
 
@@ -67,6 +68,21 @@ def test_ollama_connection(base_url: str = "http://localhost:11434") -> tuple[bo
         return False, []
 
 
+def _teto_do_erro(e: Exception) -> int | None:
+    """Extrai o limite de max_tokens que a API informou na recusa."""
+    texto = str(e)
+
+    if "max_tokens" not in texto:
+        return None
+
+    # A recusa vem no formato "max_tokens must be less than or equal to N".
+    # Buscar qualquer numero pegaria o 400 do codigo HTTP, entao ancora-se
+    # na frase.
+    achado = re.search("less than or equal to ([0-9]+)", texto)
+
+    return int(achado.group(1)) if achado else None
+
+
 def _mensagem_de_erro_groq(e: Exception) -> str:
     """Traduz a exceção do SDK numa mensagem que diz o que fazer."""
     texto = str(e)
@@ -107,7 +123,21 @@ def call_groq(client: Groq, model: str, messages: list[dict],
             max_tokens=max_tokens,
         )
     except Exception as e:
-        raise ErroDeIA(_mensagem_de_erro_groq(e))
+        # Alguns modelos aceitam menos tokens de saida do que pedimos. Quando
+        # o teto nao veio junto com a lista, a API recusa com 400 e informa o
+        # limite: tenta uma vez com o valor aceito, em vez de desistir.
+        limite = _teto_do_erro(e)
+        if limite is None or limite >= max_tokens:
+            raise ErroDeIA(_mensagem_de_erro_groq(e))
+        try:
+            resposta = client.chat.completions.create(
+                messages=messages,
+                model=model,
+                temperature=TEMPERATURA,
+                max_tokens=limite,
+            )
+        except Exception as e2:
+            raise ErroDeIA(_mensagem_de_erro_groq(e2))
 
     segundos = time.perf_counter() - inicio
 
@@ -178,16 +208,20 @@ def call_ai(backend: str, client, model: str, messages: list[dict],
     return call_ollama(model, messages, base_url=ollama_url, max_tokens=max_tokens)
 
 
-def listar_modelos_groq(api_key: str) -> tuple[list[str], str | None]:
+def listar_modelos_groq(api_key: str) -> tuple[list[str], dict[str, int], str | None]:
     """
-    Pergunta a' Groq quais modelos esta chave pode usar.
+    Pergunta a' Groq quais modelos esta chave pode usar, e o teto de saida
+    de cada um.
 
     Lista fixa no codigo apodrece: a Groq aposenta e renomeia modelos, e o
     usuario so descobre com um 404 na hora de analisar. Aqui a lista vem do
     proprio servico, ja filtrada pelo que a chave tem acesso.
 
-    Devolve (modelos, erro). Em caso de falha, devolve ([], mensagem) para
-    que a interface possa cair na lista de reserva.
+    O teto importa porque varia por modelo: pedir mais do que o modelo aceita
+    e' recusado com 400 antes de gerar qualquer coisa.
+
+    Devolve (modelos, tetos, erro). Em caso de falha, devolve ([], {}, msg)
+    para que a interface possa cair na lista de reserva.
     """
     try:
         r = requests.get(
@@ -196,17 +230,30 @@ def listar_modelos_groq(api_key: str) -> tuple[list[str], str | None]:
             timeout=15,
         )
     except requests.RequestException as e:
-        return [], f"Nao foi possivel consultar os modelos: {e}"
+        return [], {}, f"Nao foi possivel consultar os modelos: {e}"
 
     if r.status_code == 401:
-        return [], "API Key da Groq invalida."
+        return [], {}, "API Key da Groq invalida."
 
     if r.status_code != 200:
-        return [], f"A Groq respondeu {r.status_code} ao listar modelos."
+        return [], {}, f"A Groq respondeu {r.status_code} ao listar modelos."
 
     dados = r.json().get("data", [])
 
-    return _filtrar_modelos_de_texto(dados), None
+    modelos = _filtrar_modelos_de_texto(dados)
+
+    tetos = {}
+
+    for m in dados:
+        if not isinstance(m, dict) or m.get("id") not in modelos:
+            continue
+        # A Groq informa max_completion_tokens quando o teto de saida e'
+        # menor que a janela de contexto. Sem o campo, fica o padrao.
+        teto = m.get("max_completion_tokens") or m.get("context_window")
+        if isinstance(teto, int) and teto > 0:
+            tetos[m["id"]] = teto
+
+    return modelos, tetos, None
 
 
 # Familias que a conta expoe mas que nao geram texto (fala, transcricao) ou

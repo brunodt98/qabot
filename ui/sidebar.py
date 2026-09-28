@@ -19,13 +19,13 @@ GROQ_MODELOS_RESERVA = [
 
 
 @st.cache_data(show_spinner=False, ttl=600)
-def _modelos_da_chave(api_key: str) -> tuple[list[str], str | None]:
+def _modelos_da_chave(api_key: str) -> tuple[list[str], dict[str, int], str | None]:
     """Cacheia a lista por chave, para não consultar a cada rerun."""
     return listar_modelos_groq(api_key)
 
 
-def _render_groq() -> tuple[object, str | None, bool]:
-    """Controles do backend Groq. Devolve (client, modelo, pronto)."""
+def _render_groq() -> tuple[object, str | None, int | None, bool]:
+    """Controles do backend Groq. Devolve (client, modelo, teto, pronto)."""
     api_key = st.text_input(
         "API Key Groq",
         type="password",
@@ -39,20 +39,21 @@ def _render_groq() -> tuple[object, str | None, bool]:
             "não pede cartão."
         )
         st.selectbox("Modelo", GROQ_MODELOS_RESERVA, disabled=True)
-        return None, None, False
+        return None, None, None, False
 
     client = build_groq_client(api_key)
 
     if client is None:
         st.error("Não foi possível criar o cliente com essa chave.")
-        return None, None, False
+        return None, None, None, False
 
-    modelos, erro = _modelos_da_chave(api_key)
+    modelos, tetos, erro = _modelos_da_chave(api_key)
 
     if erro:
         st.error(erro)
         st.caption("Usando a lista de reserva — pode conter modelo aposentado.")
         modelos = GROQ_MODELOS_RESERVA
+        tetos = {}
     else:
         st.success(f"Conectado. {len(modelos)} modelos disponíveis.")
 
@@ -62,7 +63,12 @@ def _render_groq() -> tuple[object, str | None, bool]:
         help="Lista obtida da própria Groq, já filtrada pelo que esta chave acessa.",
     )
 
-    return client, modelo, True
+    teto = tetos.get(modelo)
+
+    if teto:
+        st.caption(f"Saída máxima deste modelo: {teto:,} tokens.".replace(",", "."))
+
+    return client, modelo, teto, True
 
 
 def _render_ollama() -> tuple[str, str | None, bool]:
@@ -112,9 +118,10 @@ def render_sidebar() -> dict:
         ollama_url = "http://localhost:11434"
 
         if backend == "Groq":
-            client, model, ready = _render_groq()
+            client, model, max_tokens, ready = _render_groq()
         else:
             ollama_url, model, ready = _render_ollama()
+            max_tokens = None
 
         st.markdown("<div class='side-rule'></div>", unsafe_allow_html=True)
 
@@ -129,5 +136,6 @@ def render_sidebar() -> dict:
         "client": client,
         "model": model,
         "ollama_url": ollama_url,
+        "max_tokens": max_tokens,
         "ready": ready,
     }
