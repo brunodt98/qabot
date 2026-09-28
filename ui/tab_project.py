@@ -5,7 +5,7 @@ import zipfile
 import tempfile
 import io
 import streamlit as st
-from core.file_scanner import scan_project, read_file, get_language_from_ext, build_file_tree
+from core.file_scanner import get_language_from_ext
 from core.analyzer import analisar_conteudo
 from utils.helpers import render_full_analysis, render_file_tree
 
@@ -269,9 +269,23 @@ Selecione vários arquivos de código diretamente (sem precisar compactar).
                 text=f"🔍 Analisando {finfo['name']} ({i+1}/{len(selected_files)})..."
             )
             lang = get_language_from_ext(finfo["ext"])
-            results[finfo["relative_path"]] = analisar_conteudo(
+            res = analisar_conteudo(
                 ai_cfg, finfo["name"], lang, finfo["content"]
             )
+            results[finfo["relative_path"]] = res
+
+            # Bateu no limite de requisicoes: insistir nos arquivos seguintes
+            # so produz a mesma falha repetida. Para o lote e devolve o que
+            # ja foi analisado.
+            if res.erro and "Limite de uso" in res.erro:
+                restantes = len(selected_files) - (i + 1)
+                if restantes:
+                    st.warning(
+                        f"Limite de requisicoes da API atingido. "
+                        f"{restantes} arquivo(s) nao foram analisados — "
+                        f"aguarde alguns instantes e rode de novo apenas eles."
+                    )
+                break
 
         progress.progress(1.0, text="✅ Concluído!")
         st.session_state["proj_results"] = results
