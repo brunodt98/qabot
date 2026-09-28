@@ -148,6 +148,28 @@ modelo e a data da execução registrados.
 chamadas de API e precisa ser executada com uma chave própria. O que está
 versionado é o instrumento de medida, não uma nota de desempenho.
 
+## Escala de severidade
+
+Severidade é uma escala de **status**, não uma paleta categórica: os quatro
+níveis não são intercambiáveis, e a cor nunca aparece sozinha — cada selo traz
+o ícone e o nome do nível, porque cor isolada não é acessível.
+
+| Nível | Cor |
+|---|---|
+| Crítico | `#8f1220` |
+| Alto | `#d1731c` |
+| Médio | `#e8b33a` |
+| Baixo | `#767c86` |
+
+Os passos foram validados contra a superfície clara: o par mais próximo
+(médio ↔ alto) fica em ΔE 16,2 em visão normal e 14,5 em deuteranopia, acima
+do piso usado como referência. A variação de luminosidade é deliberada —
+quanto mais grave, mais pesado — e "baixo" é cinza de propósito, para ser
+recessivo.
+
+A barra do score usa as mesmas três faixas que o prompt impõe ao modelo, então
+a cor concorda com a regra em vez de sugerir outra leitura.
+
 ## Stack
 
 | Camada | Escolha |
@@ -169,12 +191,15 @@ qabot/
 │   ├── analyzer.py         # prompts, schema JSON e parsing das respostas
 │   └── file_scanner.py     # varredura, filtros e leitura dos arquivos
 ├── ui/
+│   ├── theme.py            # identidade visual e paleta de severidade
 │   ├── sidebar.py          # escolha de backend, modelo e chave
 │   ├── tab_project.py      # análise em lote (ZIP, arquivos ou pasta)
 │   ├── tab_code.py         # análise de um trecho colado
 │   └── tab_chat.py         # chat sobre QA
 ├── utils/
 │   └── helpers.py          # renderização do laudo
+├── .streamlit/
+│   └── config.toml         # tema do Streamlit
 ├── eval/
 │   ├── casos/              # 8 arquivos com defeitos plantados
 │   ├── gabarito.json       # o que deveria ser encontrado em cada um

@@ -6,4 +6,5 @@
 .venv/
 .venv/
 __pycache__/
+eval/resultado_avaliacao.json
 venv/

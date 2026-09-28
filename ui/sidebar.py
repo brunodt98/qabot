@@ -2,6 +2,7 @@
 
 import streamlit as st
 from core.ai_client import build_groq_client, test_ollama_connection
+from ui import theme
 
 GROQ_MODELS = [
     "llama-3.3-70b-versatile",
@@ -12,12 +13,13 @@ GROQ_MODELS = [
 
 def render_sidebar() -> dict:
     with st.sidebar:
-        st.markdown("## 🛡️ QABot")
-        st.caption("Assistente de Qualidade de Software com IA")
-        st.divider()
+        theme.marca_lateral("QABot", "Qualidade de código")
+
+        st.markdown("<div class='side-rule'></div>", unsafe_allow_html=True)
+        st.markdown("<div class='side-lbl'>Motor de IA</div>", unsafe_allow_html=True)
 
         backend_choice = st.selectbox(
-            "🤖 Backend de IA",
+            "Backend",
             ["Groq — online, gratuito", "Ollama — local, offline"],
         )
         backend = "Groq" if "Groq" in backend_choice else "Ollama"
@@ -28,8 +30,8 @@ def render_sidebar() -> dict:
         ready  = False
 
         if backend == "Groq":
-            api_key = st.text_input("🔑 API Key Groq", type="password",
-                                    help="Gratuita em https://console.groq.com/keys")
+            api_key = st.text_input("API Key Groq", type="password",
+                                    help="Gratuita em console.groq.com/keys")
             model = st.selectbox("Modelo", GROQ_MODELS)
 
             if api_key:
@@ -44,13 +46,13 @@ def render_sidebar() -> dict:
         else:
             ollama_url = st.text_input("URL Ollama", value="http://localhost:11434")
             model      = st.text_input("Modelo", value="llama3")
-            if st.button("🔌 Testar Ollama"):
+            if st.button("Testar conexão"):
                 ok, modelos = test_ollama_connection(ollama_url)
                 if ok:
-                    st.success(f"✅ Conectado! Modelos: {', '.join(modelos[:3])}")
+                    st.success(f"Conectado. Modelos: {', '.join(modelos[:3])}")
                     ready = True
                 else:
-                    st.error("❌ Ollama offline.")
+                    st.error("Ollama não respondeu neste endereço.")
             if model and ollama_url:
                 ready = True
 
