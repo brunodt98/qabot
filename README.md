@@ -78,6 +78,10 @@ como regra:
 
 ### Varredura
 
+O envio é por upload — ZIP do projeto ou arquivos avulsos. Não há campo de
+caminho local: num app publicado, ler um caminho do disco leria o disco do
+servidor, não o da pessoa que está usando.
+
 [core/file_scanner.py](core/file_scanner.py) aceita 20 extensões (Python,
 JavaScript/TypeScript, Java, C#, C/C++, Go, Ruby, PHP, HTML, CSS, SQL, shell,
 JSON, YAML, Markdown) e ignora `__pycache__`, `.git`, `node_modules`, `.venv`,
@@ -102,8 +106,8 @@ execuções mais do que o necessário.
 
 ### Três modos de uso
 
-- **Analisar Projeto** — sobe um ZIP, seleciona arquivos soltos ou aponta um
-  caminho de pasta local; varre e analisa em lote
+- **Analisar Projeto** — sobe um ZIP ou arquivos avulsos e analisa em lote,
+  parando se a API recusar por limite de requisições
 - **Analisar Código** — cola um trecho direto e recebe o laudo
 - **Chat QA** — conversa sobre testes, CI/CD, refatoração e boas práticas,
   sem contexto de arquivo
@@ -189,7 +193,7 @@ qabot/
 ├── core/
 │   ├── ai_client.py        # Groq e Ollama atrás da mesma interface
 │   ├── analyzer.py         # prompts, schema JSON e parsing das respostas
-│   └── file_scanner.py     # varredura, filtros e leitura dos arquivos
+│   └── file_scanner.py     # filtros e metadados dos arquivos
 ├── ui/
 │   ├── theme.py            # identidade visual e paleta de severidade
 │   ├── sidebar.py          # escolha de backend, modelo e chave
