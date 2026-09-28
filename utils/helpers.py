@@ -101,18 +101,21 @@ def render_full_analysis(data: dict, filename: str, lang: str):
     theme.barra_severidades(contagem, SEV_ICON)
 
     # ── Diagnóstico ──────────────────────────────────────────────────────────
-    if resumo:
-        theme.diagnostico(
-            f"{resumo}<br><br><b>Complexidade {dif}</b> — {justif}"
-            if justif else resumo
-        )
+    # Sem problemas, o resumo do modelo já diz que está limpo: uma segunda
+    # frase nossa dizendo o mesmo só ocupa espaço. Os dois viram um box só.
+    texto_diag = (
+        f"{resumo}<br><br><b>Complexidade {dif}</b> — {justif}"
+        if resumo and justif else resumo
+    )
+
+    if not problemas:
+        theme.sem_problemas(texto_diag or "Nenhum problema apontado neste arquivo.")
+    else:
+        if texto_diag:
+            theme.diagnostico(texto_diag)
 
     # ── Problemas ────────────────────────────────────────────────────────────
-    if not problemas:
-        theme.sem_problemas(
-            "Nenhum problema apontado neste arquivo."
-        )
-    else:
+    if problemas:
         theme.secao(
             f"{len(problemas)} problema(s) encontrado(s)",
             "Ordenados do mais grave para o menos grave.",
