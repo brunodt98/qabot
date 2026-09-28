@@ -79,6 +79,11 @@ def _mensagem_de_erro_groq(e: Exception) -> str:
         return ("Limite de uso da Groq atingido. Aguarde alguns instantes ou "
                 "troque para um modelo menor na barra lateral.")
 
+    if "model_terms_required" in texto:
+        return ("Este modelo exige aceitar os termos de uso no painel da Groq "
+                "antes do primeiro uso. Escolha outro modelo na lista ou "
+                "aceite os termos em console.groq.com/playground.")
+
     if codigo == 413 or "too large" in texto.lower():
         return ("O arquivo excede o limite de contexto deste modelo. "
                 "Analise-o em partes ou escolha um modelo com contexto maior.")
@@ -201,14 +206,35 @@ def listar_modelos_groq(api_key: str) -> tuple[list[str], str | None]:
 
     dados = r.json().get("data", [])
 
-    # A conta tambem expoe modelos de audio (whisper) e de moderacao, que
-    # nao servem para analisar codigo.
-    ignorar = ("whisper", "tts", "guard", "distil")
+    return _filtrar_modelos_de_texto(dados), None
 
-    modelos = sorted(
+
+# Familias que a conta expoe mas que nao geram texto (fala, transcricao) ou
+# que servem a outro proposito (moderacao). Escolher uma delas so produz erro
+# na hora de analisar.
+FAMILIAS_NAO_TEXTUAIS = (
+    "whisper", "tts", "speech", "orpheus", "playai", "audio",
+    "guard", "moderation", "prompt-guard",
+)
+
+# Preferidos aparecem primeiro, para que o seletor ja abra num modelo que
+# funciona. O resto vem depois, em ordem alfabetica.
+PREFERIDOS = (
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+)
+
+
+def _filtrar_modelos_de_texto(dados: list) -> list[str]:
+    """Mantem so modelos de texto e poe os preferidos no topo."""
+    ids = [
         m["id"] for m in dados
         if isinstance(m, dict) and m.get("id")
-        and not any(t in m["id"].lower() for t in ignorar)
-    )
+        and m.get("active", True)
+        and not any(f in m["id"].lower() for f in FAMILIAS_NAO_TEXTUAIS)
+    ]
 
-    return modelos, None
+    topo = [m for m in PREFERIDOS if m in ids]
+    resto = sorted(m for m in ids if m not in topo)
+
+    return topo + resto
